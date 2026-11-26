@@ -36,7 +36,7 @@ jobs:
           java-version: "25"
 
       - name: Instalar o Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Configurar o Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -110,7 +110,7 @@ jobs:
           java-version: "25"
 
       - name: Instalar o Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Enviar o grafo de dependências
         uses: gradle/actions/dependency-submission@v4
