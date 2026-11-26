@@ -26,7 +26,7 @@ jobs:
     timeout-minutes: 40
     steps:
       - name: Obter o código
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Instalar o Java
         uses: actions/setup-java@v4
