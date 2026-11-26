@@ -37,7 +37,7 @@ jobs:
         uses: ./.github/actions/android-sdk
 
       - name: Configurar o Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
 
       - name: Preparar a assinatura
         shell: bash
