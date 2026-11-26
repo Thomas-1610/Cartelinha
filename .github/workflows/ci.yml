@@ -87,10 +87,11 @@ jobs:
         uses: gradle/actions/wrapper-validation@v4
 
       - name: Procurar segredos expostos
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_CONFIG: .gitleaks.toml
+        shell: bash
+        run: |
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v8.30.0/gitleaks_8.30.0_linux_x64.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" detect --source . --config .gitleaks.toml --redact --verbose --exit-code 1
 
   grafo-dependencias:
     name: Grafo de dependências
