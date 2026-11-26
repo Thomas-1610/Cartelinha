@@ -28,7 +28,7 @@ jobs:
           ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Instalar o Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "25"
