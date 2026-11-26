@@ -39,7 +39,7 @@ jobs:
         uses: ./.github/actions/android-sdk
 
       - name: Configurar o Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
 
       - name: Análise estática (Android Lint)
         run: ./gradlew :app:lintDebug --no-daemon
@@ -84,7 +84,7 @@ jobs:
         run: bash scripts/verificar-integridade.sh
 
       - name: Validar o Gradle Wrapper
-        uses: gradle/actions/wrapper-validation@v4
+        uses: gradle/actions/wrapper-validation@v6
 
       - name: Procurar segredos expostos
         shell: bash
@@ -114,7 +114,7 @@ jobs:
         uses: ./.github/actions/android-sdk
 
       - name: Enviar o grafo de dependências
-        uses: gradle/actions/dependency-submission@v4
+        uses: gradle/actions/dependency-submission@v6
 
   politica:
     name: Política da pull request
@@ -184,7 +184,7 @@ jobs:
           java-version: "25"
 
       - name: Configurar o Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
 
       - name: Habilitar o KVM
         run: |
