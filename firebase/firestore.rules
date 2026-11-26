@@ -1,0 +1,304 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // users/{uid}
+    //   uid: string, email: string, role: string, coupleId: string,
+    //   partnerName: string, snoozeMinutes: int, remindersEnabled: bool,
+    //   updatedAt: timestamp
+    //
+    // couples/{coupleId}
+    //   memberIds: list (1 or 2), ownerUid: string, partnerName: string,
+    //   consumedCode: string, lastInviteCode: string, updatedAt: timestamp
+    //
+    // couples/{coupleId}/cycle/config
+    //   methodId, customName, schemeType: string
+    //   packSize, activeCount, pauseDays, doseIntervalDays, reminderMinutesOfDay: int
+    //   cycleAnchorEpochDay, updatedAtMillis, version: int
+    //   remindersEnabled: bool
+    //
+    // couples/{coupleId}/records/{epochDay}
+    //   epochDay, updatedAtMillis, version: int
+    //   status: TAKEN | MISSED | SKIPPED_PLACEBO
+    //   takenAtMillis: int or null, note: string
+    //
+    // couples/{coupleId}/edits/{id}
+    //   epochDay, editedAtMillis: int
+    //   oldStatus, newStatus, note: string
+    //
+    // inviteCodes/{code}
+    //   code, coupleId, ownerUid: string
+    //   expiresAt, createdAt: timestamp
+    //   used: bool
+    //
+    // fcmTokens/{uid}
+    //   token, coupleId, role: string
+    //   updatedAt: timestamp
+    //
+    // Prototype rules: review before sharing the app widely.
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function coupleData(coupleId) {
+      return get(/databases/$(database)/documents/couples/$(coupleId)).data;
+    }
+
+    function isMember(coupleId) {
+      return signedIn() && request.auth.uid in coupleData(coupleId).memberIds;
+    }
+
+    function isOwner(coupleId) {
+      return signedIn() && request.auth.uid == coupleData(coupleId).ownerUid;
+    }
+
+    function validCode(code, coupleId) {
+      return code is string
+        && code.size() == 6
+        && exists(/databases/$(database)/documents/inviteCodes/$(code))
+        && get(/databases/$(database)/documents/inviteCodes/$(code)).data.coupleId == coupleId
+        && get(/databases/$(database)/documents/inviteCodes/$(code)).data.used == false
+        && get(/databases/$(database)/documents/inviteCodes/$(code)).data.expiresAt > request.time;
+    }
+
+    function same(field) {
+      return request.resource.data.get(field, null) == resource.data.get(field, null);
+    }
+
+    function validCouple(data) {
+      return data.keys().hasAll(['memberIds', 'ownerUid', 'partnerName', 'consumedCode', 'lastInviteCode'])
+        && data.memberIds is list
+        && data.memberIds.size() >= 1
+        && data.memberIds.size() <= 2
+        && data.ownerUid is string
+        && data.ownerUid.size() > 0
+        && data.partnerName is string
+        && data.partnerName.size() <= 80
+        && (!('memberName' in data) || (data.memberName is string && data.memberName.size() <= 80))
+        && data.consumedCode is string
+        && data.consumedCode.size() <= 12
+        && data.lastInviteCode is string
+        && data.lastInviteCode.size() <= 12;
+    }
+
+    function validConfig(data) {
+      return data.keys().hasAll([
+          'methodId', 'customName', 'schemeType', 'packSize', 'activeCount', 'pauseDays',
+          'doseIntervalDays', 'cycleAnchorEpochDay', 'reminderMinutesOfDay',
+          'remindersEnabled', 'updatedAtMillis', 'version'
+        ])
+        && data.methodId is string
+        && data.customName is string
+        && data.customName.size() <= 80
+        && data.schemeType in ['PACK', 'CONTINUOUS', 'PERIODIC']
+        && data.packSize is int
+        && data.packSize >= 1
+        && data.packSize <= 365
+        && data.activeCount is int
+        && data.activeCount >= 0
+        && data.activeCount <= data.packSize
+        && data.pauseDays is int
+        && data.pauseDays >= 0
+        && data.pauseDays <= 365
+        && data.doseIntervalDays is int
+        && data.doseIntervalDays >= 0
+        && data.doseIntervalDays <= 400
+        && data.cycleAnchorEpochDay is int
+        && data.reminderMinutesOfDay is int
+        && data.reminderMinutesOfDay >= 0
+        && data.reminderMinutesOfDay < 1440
+        && data.remindersEnabled is bool
+        && data.updatedAtMillis is int
+        && data.version is int
+        && (!('updatedByUid' in data) || (data.updatedByUid is string && data.updatedByUid.size() <= 128))
+        && (!('recordsResetAt' in data) || data.recordsResetAt is int);
+    }
+
+    function validRecord(data) {
+      return data.keys().hasAll(['epochDay', 'status', 'note', 'updatedAtMillis', 'version'])
+        && data.keys().hasOnly(['epochDay', 'status', 'takenAtMillis', 'note', 'updatedAtMillis', 'version'])
+        && data.epochDay is int
+        && data.status in ['TAKEN', 'MISSED', 'SKIPPED_PLACEBO']
+        && data.note is string
+        && data.note.size() <= 500
+        && data.updatedAtMillis is int
+        && data.version is int
+        && (data.takenAtMillis == null || data.takenAtMillis is int);
+    }
+
+    function validEdit(data) {
+      return data.keys().hasOnly(['epochDay', 'oldStatus', 'newStatus', 'editedAtMillis', 'note'])
+        && data.epochDay is int
+        && data.oldStatus is string
+        && data.oldStatus.size() <= 32
+        && data.newStatus is string
+        && data.newStatus.size() <= 32
+        && data.editedAtMillis is int
+        && data.note is string
+        && data.note.size() <= 500;
+    }
+
+    function validInvite(data) {
+      return data.keys().hasAll(['code', 'coupleId', 'ownerUid', 'expiresAt', 'used'])
+        && data.code is string
+        && data.code.size() == 6
+        && data.coupleId is string
+        && data.ownerUid is string
+        && data.expiresAt is timestamp
+        && data.used is bool;
+    }
+
+    function validUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'role', 'coupleId', 'partnerName', 'snoozeMinutes', 'remindersEnabled'])
+        && data.uid == request.auth.uid
+        && data.email is string
+        && data.email.size() <= 120
+        && data.role in ['WOMAN', 'MAN']
+        && data.coupleId is string
+        && data.partnerName is string
+        && data.partnerName.size() <= 80
+        && data.snoozeMinutes is int
+        && data.snoozeMinutes >= 1
+        && data.snoozeMinutes <= 180
+        && data.remindersEnabled is bool
+        && (!('setupDone' in data) || data.setupDone is bool);
+    }
+
+    function validToken(data) {
+      return data.keys().hasAll(['token', 'coupleId', 'role'])
+        && data.token is string
+        && data.token.size() <= 4096
+        && data.coupleId is string
+        && data.role in ['woman', 'man'];
+    }
+
+    match /users/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow create, update: if signedIn()
+        && request.auth.uid == uid
+        && validUser(request.resource.data);
+      allow delete: if signedIn() && request.auth.uid == uid;
+    }
+
+    match /couples/{coupleId} {
+      allow get: if isMember(coupleId);
+      allow create: if signedIn()
+        && validCouple(request.resource.data)
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.memberIds.size() == 1
+        && request.auth.uid in request.resource.data.memberIds
+        && request.resource.data.consumedCode == ''
+        && request.resource.data.lastInviteCode == '';
+      allow update: if signedIn() && validCouple(request.resource.data) && (
+        (
+          isOwner(coupleId)
+          && same('ownerUid')
+          && same('memberIds')
+        )
+        ||
+        (
+          isOwner(coupleId)
+          && same('ownerUid')
+          && same('partnerName')
+          && same('consumedCode')
+          && same('lastInviteCode')
+          && resource.data.memberIds.size() == 2
+          && request.resource.data.memberIds.hasOnly([request.auth.uid])
+        )
+        ||
+        (
+          resource.data.memberIds.size() == 1
+          && request.resource.data.memberIds.size() == 2
+          && request.auth.uid in request.resource.data.memberIds
+          && request.resource.data.memberIds.hasAll(resource.data.memberIds)
+          && same('ownerUid')
+          && same('partnerName')
+          && same('lastInviteCode')
+          && validCode(request.resource.data.consumedCode, coupleId)
+        )
+        ||
+        (
+          request.auth.uid in resource.data.memberIds
+          && request.auth.uid != resource.data.ownerUid
+          && !(request.auth.uid in request.resource.data.memberIds)
+          && request.resource.data.memberIds.hasAll(resource.data.memberIds.removeAll([request.auth.uid]))
+          && resource.data.memberIds.hasAll(request.resource.data.memberIds)
+          && same('ownerUid')
+          && same('partnerName')
+          && same('consumedCode')
+          && same('lastInviteCode')
+        )
+        ||
+        (
+          isMember(coupleId)
+          && request.auth.uid != resource.data.ownerUid
+          && same('ownerUid')
+          && same('memberIds')
+          && same('partnerName')
+          && same('consumedCode')
+          && same('lastInviteCode')
+          && request.resource.data.memberName is string
+          && request.resource.data.memberName.size() <= 80
+        )
+      );
+      allow delete: if isOwner(coupleId);
+
+      match /cycle/{doc} {
+        allow get: if isMember(coupleId);
+        allow create, update: if isMember(coupleId) && validConfig(request.resource.data);
+        allow delete: if isOwner(coupleId);
+      }
+
+      match /records/{doc} {
+        allow get, list: if isMember(coupleId);
+        allow create, update: if isOwner(coupleId) && validRecord(request.resource.data);
+        allow delete: if isMember(coupleId);
+      }
+
+      match /edits/{doc} {
+        allow get, list: if isMember(coupleId);
+        allow create, update: if isOwner(coupleId) && validEdit(request.resource.data);
+        allow delete: if isMember(coupleId);
+      }
+    }
+
+    match /inviteCodes/{code} {
+      allow get: if signedIn();
+      allow create: if signedIn()
+        && validInvite(request.resource.data)
+        && request.resource.data.code == code
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.used == false
+        && request.resource.data.expiresAt > request.time;
+      allow update: if signedIn() && validInvite(request.resource.data) && (
+        (
+          request.auth.uid == resource.data.ownerUid
+          && request.resource.data.ownerUid == resource.data.ownerUid
+          && request.resource.data.coupleId == resource.data.coupleId
+          && request.resource.data.code == resource.data.code
+        )
+        ||
+        (
+          resource.data.used == false
+          && request.resource.data.used == true
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['used'])
+          && isMember(resource.data.coupleId)
+        )
+      );
+      allow delete: if signedIn() && request.auth.uid == resource.data.ownerUid;
+    }
+
+    match /fcmTokens/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow create, update: if signedIn()
+        && request.auth.uid == uid
+        && validToken(request.resource.data);
+      allow delete: if signedIn() && request.auth.uid == uid;
+    }
+  }
+}

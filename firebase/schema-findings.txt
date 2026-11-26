@@ -1,0 +1,39 @@
+Firestore paths used by the Android client (com.example.cartelinha):
+
+users/{uid}
+  uid, email, role, coupleId, partnerName, snoozeMinutes, remindersEnabled, updatedAt
+  read/write: only that uid. No list.
+
+couples/{coupleId}
+  memberIds (list), ownerUid, partnerName, consumedCode, lastInviteCode, updatedAt
+  coupleId is the owner uid.
+  create: signed-in owner, memberIds == [owner]
+  update: owner may change partnerName, consumedCode, lastInviteCode without changing members
+  update: a new member may grow memberIds from 1 to 2 only with a valid unused invite code
+  update: a non-owner member may remove only their own uid
+  delete: owner
+  reads: members only. No collection list.
+
+couples/{coupleId}/cycle/config
+  methodId, customName, schemeType, packSize, activeCount, pauseDays, doseIntervalDays,
+  cycleAnchorEpochDay, reminderMinutesOfDay, remindersEnabled, updatedAtMillis, version
+  read: members. write: owner.
+
+couples/{coupleId}/records/{epochDay}
+  epochDay, status (TAKEN|MISSED|SKIPPED_PLACEBO), takenAtMillis, note, updatedAtMillis, version
+  collection read (snapshot listener, no where/orderBy). write: owner.
+
+couples/{coupleId}/edits/{epochDay_millis}
+  epochDay, oldStatus, newStatus, editedAtMillis, note
+  collection read. write: owner.
+
+iniviteCodes/{code}  (collection name: inviteCodes)
+  code, coupleId, ownerUid, expiresAt, used, createdAt
+  get by id if signed in (redeem). no list.
+  create: ownerUid == auth. update/delete: owner, or the new member flipping used false->true.
+
+fcmTokens/{uid}
+  token, coupleId, role, updatedAt
+  read/write: only that uid.
+
+Queries: document gets, collection snapshot listeners, subcollection gets. No where/orderBy/limit.

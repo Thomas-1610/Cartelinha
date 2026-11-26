@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "672996004921",
+    "project_id": "cartelinha-e45b4",
+    "storage_bucket": "cartelinha-e45b4.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:672996004921:android:6a7b75109d79a5c462a9e8",
+        "android_client_info": {
+          "package_name": "com.example.cartelinha"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD2MhwJnOcQz2iD44-gzPR642DTcvDy3CI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
