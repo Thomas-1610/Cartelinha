@@ -35,7 +35,7 @@ jobs:
           java-version: "25"
 
       - name: Instalar o Android SDK
-        uses: android-actions/setup-android@v3
+        uses: ./.github/actions/android-sdk
 
       - name: Iniciar o CodeQL
         uses: github/codeql-action/init@v3
