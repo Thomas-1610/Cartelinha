@@ -1,0 +1,139 @@
+name: CD Produção
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - main
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publicar:
+    name: Publicar produção
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment:
+      name: production
+    steps:
+      - name: Obter a revisão validada
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Instalar o Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Instalar o Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Configurar o Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Preparar a assinatura
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          test -n "$KEYSTORE_BASE64" || { echo "Secret KEYSTORE_BASE64 ausente."; exit 1; }
+          test -n "$KEYSTORE_PASSWORD" || { echo "Secret KEYSTORE_PASSWORD ausente."; exit 1; }
+          test -n "$KEY_ALIAS" || { echo "Secret KEY_ALIAS ausente."; exit 1; }
+          test -n "$KEY_PASSWORD" || { echo "Secret KEY_PASSWORD ausente."; exit 1; }
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+
+      - name: Ler a versão
+        id: versao
+        shell: bash
+        run: |
+          nome="$(grep '^VERSION_NAME=' version.properties | cut -d= -f2)"
+          codigo="$(grep '^VERSION_CODE=' version.properties | cut -d= -f2)"
+          echo "nome=$nome" >> "$GITHUB_OUTPUT"
+          echo "codigo=$codigo" >> "$GITHUB_OUTPUT"
+          echo "tag=v$nome" >> "$GITHUB_OUTPUT"
+
+      - name: Gerar o APK assinado
+        run: ./gradlew :app:assembleRelease --no-daemon
+
+      - name: Organizar os arquivos da release
+        shell: bash
+        run: |
+          mkdir -p dist
+          apk="$(find app/build/outputs/apk/release -name '*.apk' -print -quit)"
+          test -n "$apk"
+          cp "$apk" dist/Cartelinha.apk
+          cp "$apk" "dist/Cartelinha-v${{ steps.versao.outputs.nome }}.apk"
+
+      - name: Montar as notas da versão
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import pathlib, re, os
+          version = os.environ["VERSION_NAME"]
+          text = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+          match = re.search(rf"## \[{re.escape(version)}\][^\n]*\n(.*?)(?=\n## \[|\Z)", text, re.S)
+          body = match.group(1).strip() if match else "Versão publicada do Cartelinha."
+          notes = (
+              f"Cartelinha {version}\n\n"
+              f"{body}\n\n"
+              "Baixe o arquivo Cartelinha.apk. "
+              "Use somente os arquivos desta página oficial de releases.\n"
+          )
+          pathlib.Path("release-notes.md").write_text(notes, encoding="utf-8")
+          PY
+        env:
+          VERSION_NAME: ${{ steps.versao.outputs.nome }}
+
+      - name: Publicar a release e a tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.versao.outputs.tag }}
+          VERSION_NAME: ${{ steps.versao.outputs.nome }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/Cartelinha.apk "dist/Cartelinha-v${VERSION_NAME}.apk" --clobber
+            gh release edit "$TAG" --latest --title "Cartelinha ${VERSION_NAME}" --notes-file release-notes.md
+          else
+            gh release create "$TAG" \
+              dist/Cartelinha.apk \
+              "dist/Cartelinha-v${VERSION_NAME}.apk" \
+              --target "${{ github.event.workflow_run.head_sha }}" \
+              --title "Cartelinha ${VERSION_NAME}" \
+              --notes-file release-notes.md \
+              --latest
+          fi
+          {
+            echo "### Produção"
+            echo "- Versão: ${VERSION_NAME}"
+            echo "- Tag: \`${TAG}\`"
+            echo "- Download: https://github.com/${{ github.repository }}/releases/latest/download/Cartelinha.apk"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Registrar a sincronização com develop
+        shell: bash
+        env:
+          VERSION_NAME: ${{ steps.versao.outputs.nome }}
+        run: |
+          {
+            echo "### Depois da publicação"
+            echo "A versão ${VERSION_NAME} está em \`main\`. Atualize \`develop\` com um merge local para a próxima funcionalidade partir do código publicado:"
+            echo '```'
+            echo "git checkout develop"
+            echo "git merge main"
+            echo "git push"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

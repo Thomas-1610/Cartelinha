@@ -1,0 +1,128 @@
+name: Preparar release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tipo:
+        description: Parte da versão que aumenta
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      alteracoes:
+        description: Principais alterações, uma por linha
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  preparar:
+    name: Abrir pull request de release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Obter develop
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Calcular a próxima versão
+        id: versao
+        shell: bash
+        env:
+          TIPO: ${{ inputs.tipo }}
+          ALTERACOES: ${{ inputs.alteracoes }}
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, datetime, re
+          from zoneinfo import ZoneInfo
+
+          props = dict(
+              linha.split("=", 1)
+              for linha in pathlib.Path("version.properties").read_text(encoding="utf-8").splitlines()
+              if linha and not linha.startswith("#") and "=" in linha
+          )
+          major, minor, patch = [int(parte) for parte in props["VERSION_NAME"].split(".")]
+          code = int(props["VERSION_CODE"])
+          tipo = os.environ["TIPO"]
+          if tipo == "major":
+              major, minor, patch = major + 1, 0, 0
+          elif tipo == "minor":
+              minor, patch = minor + 1, 0
+          elif tipo == "patch":
+              patch += 1
+          else:
+              raise SystemExit(f"Tipo desconhecido: {tipo}")
+          code += 1
+          nome = f"{major}.{minor}.{patch}"
+          data = datetime.datetime.now(ZoneInfo("America/Sao_Paulo")).date().isoformat()
+          linhas = [linha.strip() for linha in os.environ["ALTERACOES"].splitlines() if linha.strip()]
+          if not linhas:
+              raise SystemExit("Informe ao menos uma alteração.")
+          bullets = "\n".join(f"- {linha.lstrip('- ').strip()}" for linha in linhas)
+          entrada = f"## [{nome}] - {data}\n\n### Alterações\n\n{bullets}\n\n"
+          changelog = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+          marcador = changelog.find("\n## [")
+          if marcador == -1:
+              changelog = changelog.rstrip() + "\n\n" + entrada
+          else:
+              changelog = changelog[: marcador + 1] + entrada + changelog[marcador + 1 :]
+          link = f"[{nome}]: https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/tag/v{nome}\n"
+          if f"[{nome}]:" not in changelog:
+              changelog = changelog.rstrip() + "\n" + link
+          pathlib.Path("version.properties").write_text(
+              "# Versão semântica publicada do aplicativo.\n"
+              "# VERSION_NAME segue MAJOR.MINOR.PATCH. VERSION_CODE só aumenta.\n"
+              f"VERSION_NAME={nome}\n"
+              f"VERSION_CODE={code}\n",
+              encoding="utf-8",
+          )
+          pathlib.Path("CHANGELOG.md").write_text(changelog, encoding="utf-8")
+          readme = pathlib.Path("README.md")
+          texto = readme.read_text(encoding="utf-8")
+          texto_novo, trocas = re.subn(
+              r"<!-- versao-atual -->.*?<!-- /versao-atual -->",
+              f"<!-- versao-atual -->v{nome}<!-- /versao-atual -->",
+              texto,
+              count=1,
+          )
+          if trocas != 1:
+              raise SystemExit("Não encontrei a versão atual no README.")
+          readme.write_text(texto_novo, encoding="utf-8")
+          pathlib.Path("release-body.md").write_text(
+              f"Prepara a versão **{nome}** para produção.\n\n"
+              "Depois que esta pull request for aprovada e integrada em `main`, "
+              "a pipeline de produção pede uma nova aprovação e publica o APK na página de Releases.\n\n"
+              f"{bullets}\n",
+              encoding="utf-8",
+          )
+          pathlib.Path(os.environ["GITHUB_OUTPUT"]).write_text(
+              f"nome={nome}\nbranch=release/v{nome}\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Publicar a branch e abrir a pull request
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          NOME: ${{ steps.versao.outputs.nome }}
+          BRANCH: ${{ steps.versao.outputs.branch }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add version.properties CHANGELOG.md README.md
+          git commit -m "release: v${NOME}"
+          git push -u origin HEAD
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "release: v${NOME}" \
+            --body-file release-body.md

@@ -1,0 +1,52 @@
+name: CodeQL
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+  pull_request:
+    branches:
+      - develop
+      - main
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  analisar:
+    name: Análise de código
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Obter o código
+        uses: actions/checkout@v4
+
+      - name: Instalar o Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Instalar o Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Iniciar o CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: java-kotlin
+          build-mode: manual
+
+      - name: Compilar para a análise
+        run: ./gradlew :app:assembleDebug --no-daemon
+
+      - name: Analisar
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:java-kotlin

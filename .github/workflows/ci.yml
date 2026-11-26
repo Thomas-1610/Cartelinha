@@ -1,0 +1,212 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+    branches:
+      - develop
+      - main
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  qualidade:
+    name: Qualidade, testes e build
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Obter o código
+        uses: actions/checkout@v4
+
+      - name: Conferir a integridade do projeto
+        run: bash scripts/verificar-integridade.sh
+
+      - name: Instalar o Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Instalar o Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Configurar o Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Análise estática (Android Lint)
+        run: ./gradlew :app:lintDebug --no-daemon
+
+      - name: Testes unitários
+        run: ./gradlew :app:testDebugUnitTest --no-daemon
+
+      - name: Validar a resolução das dependências
+        run: ./gradlew :app:dependencies --configuration debugRuntimeClasspath --no-daemon
+
+      - name: Validar o build
+        run: ./gradlew :app:assembleDebug --no-daemon
+
+      - name: Guardar relatórios
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: relatorios-qualidade
+          path: |
+            app/build/reports/lint-results-debug.html
+            app/build/reports/lint-results-debug.xml
+            app/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  seguranca:
+    name: Segurança
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: read
+      security-events: write
+    steps:
+      - name: Obter o código
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Conferir a integridade do projeto
+        run: bash scripts/verificar-integridade.sh
+
+      - name: Validar o Gradle Wrapper
+        uses: gradle/actions/wrapper-validation@v4
+
+      - name: Procurar segredos expostos
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+
+  grafo-dependencias:
+    name: Grafo de dependências
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - name: Obter o código
+        uses: actions/checkout@v4
+
+      - name: Instalar o Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Instalar o Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Enviar o grafo de dependências
+        uses: gradle/actions/dependency-submission@v4
+
+  politica:
+    name: Política da pull request
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Obter o código
+        uses: actions/checkout@v4
+
+      - name: Impedir atalho de uma funcionalidade direto para produção
+        if: github.base_ref == 'main'
+        shell: bash
+        run: |
+          case "${{ github.head_ref }}" in
+            develop|release/*)
+              echo "Origem permitida para main: ${{ github.head_ref }}"
+              ;;
+            *)
+              echo "Pull requests para main só podem sair de develop ou de release/*."
+              echo "Abra a alteração primeiro contra develop."
+              exit 1
+              ;;
+          esac
+
+      - name: Validar o título da pull request
+        uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            docs
+            style
+            refactor
+            perf
+            test
+            build
+            ci
+            chore
+            release
+            revert
+          requireScope: false
+
+      - name: Revisar dependências alteradas
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure
+
+  integracao:
+    name: Testes de integração
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Obter o código
+        uses: actions/checkout@v4
+
+      - name: Instalar o Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Configurar o Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Habilitar o KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+
+      - name: Executar testes no emulador
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none -camera-front none
+          script: ./gradlew :app:connectedDebugAndroidTest --no-daemon --no-configuration-cache
+
+      - name: Guardar resultados da integração
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: relatorios-integracao
+          path: app/build/reports/androidTests/connected/
+          if-no-files-found: ignore
+          retention-days: 14

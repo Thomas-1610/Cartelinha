@@ -1,0 +1,82 @@
+name: CD Homologação
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - develop
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  publicar:
+    name: Publicar homologação
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'develop' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment:
+      name: homologation
+    steps:
+      - name: Obter a revisão validada
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Instalar o Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Instalar o Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Configurar o Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Preparar a assinatura
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          test -n "$KEYSTORE_BASE64" || { echo "Secret KEYSTORE_BASE64 ausente."; exit 1; }
+          test -n "$KEYSTORE_PASSWORD" || { echo "Secret KEYSTORE_PASSWORD ausente."; exit 1; }
+          test -n "$KEY_ALIAS" || { echo "Secret KEY_ALIAS ausente."; exit 1; }
+          test -n "$KEY_PASSWORD" || { echo "Secret KEY_PASSWORD ausente."; exit 1; }
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          echo "VERSION_NAME_SUFFIX=-homolog" >> "$GITHUB_ENV"
+
+      - name: Gerar o APK de homologação
+        run: ./gradlew :app:assembleRelease --no-daemon
+
+      - name: Identificar a versão
+        id: versao
+        shell: bash
+        run: |
+          nome="$(grep '^VERSION_NAME=' version.properties | cut -d= -f2)"
+          codigo="$(grep '^VERSION_CODE=' version.properties | cut -d= -f2)"
+          echo "nome=$nome" >> "$GITHUB_OUTPUT"
+          echo "codigo=$codigo" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Homologação"
+            echo "- Versão: ${nome}-homolog (${codigo})"
+            echo "- Revisão: \`${{ github.event.workflow_run.head_sha }}\`"
+            echo "- O APK fica anexado a esta execução e não substitui a versão pública."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publicar o artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: cartelinha-homolog-${{ steps.versao.outputs.nome }}-${{ github.event.workflow_run.head_sha }}
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 30

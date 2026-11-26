@@ -1,0 +1,10 @@
+title = "Cartelinha"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "A chave em google-services.json identifica o app Firebase. Ela não é um segredo de servidor e o Android a inclui no aplicativo."
+paths = [
+  '''app/google-services\.json''',
+]

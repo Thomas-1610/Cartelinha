@@ -1,0 +1,53 @@
+name: Rollback de produção
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag já publicada que deve voltar a ser a versão oferecida para download
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  restaurar:
+    name: Restaurar versão publicada
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    steps:
+      - name: Obter o repositório
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validar e republicar a versão escolhida
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Informe uma tag no formato v1.2.3."
+            exit 1
+          fi
+          git fetch --tags origin
+          git rev-parse --verify "refs/tags/${TAG}^{commit}" >/dev/null
+          atual="$(gh release view --json tagName --jq .tagName 2>/dev/null || echo nenhuma)"
+          gh release view "$TAG" --json assets --jq '.assets[].name' | grep -qx 'Cartelinha.apk'
+          gh release edit "$TAG" --latest \
+            --notes "$(printf '%s\n' \
+              "Esta versão voltou a ser a oferecida para download." \
+              "" \
+              "A versão que estava em destaque antes desta restauração: ${atual}." \
+              "O histórico de tags e releases foi mantido." \
+              "" \
+              "Baixe somente o Cartelinha.apk desta página oficial.")"
+          {
+            echo "### Rollback"
+            echo "- Versão restaurada: \`${TAG}\`"
+            echo "- Versão que estava em destaque: \`${atual}\`"
+            echo "- Download atual: https://github.com/${{ github.repository }}/releases/latest/download/Cartelinha.apk"
+          } >> "$GITHUB_STEP_SUMMARY"
