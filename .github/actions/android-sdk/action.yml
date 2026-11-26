@@ -14,7 +14,16 @@ runs:
           https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
         unzip -q /tmp/commandlinetools.zip -d "$sdk/cmdline-tools"
         mv "$sdk/cmdline-tools/cmdline-tools" "$sdk/cmdline-tools/latest"
-        yes | "$sdk/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$sdk" --licenses >/dev/null
+        set +e
+        set +o pipefail
+        yes | "$sdk/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$sdk" --licenses >"$RUNNER_TEMP/sdk-licenses.log" 2>&1
+        licenca=${PIPESTATUS[1]}
+        set -e
+        set -o pipefail
+        if [ "$licenca" -ne 0 ]; then
+          cat "$RUNNER_TEMP/sdk-licenses.log"
+          exit "$licenca"
+        fi
         echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
         echo "ANDROID_SDK_ROOT=$sdk" >> "$GITHUB_ENV"
         echo "$sdk/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
