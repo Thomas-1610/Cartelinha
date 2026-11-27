@@ -20,6 +20,7 @@ output-metadata.json
 *.jks
 *.keystore
 keystore/
+.signing/
 *.p12
 *.pem
 .env

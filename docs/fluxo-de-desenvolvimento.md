@@ -1,6 +1,6 @@
 # Fluxo de desenvolvimento
 
-`main` guarda o que está publicado. `develop` junta o que já foi aceito e ainda espera a próxima versão. Nenhuma das duas recebe commit direto.
+`main` guarda o que está publicado. `develop` junta o que já foi aceito e ainda espera a próxima versão. Nenhuma das duas recebe commit direto e nenhuma das duas é apagada quando uma pull request é integrada.
 
 ## Branches
 
