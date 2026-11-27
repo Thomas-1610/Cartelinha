@@ -52,8 +52,9 @@ jobs:
           test -n "$KEYSTORE_PASSWORD" || { echo "Secret KEYSTORE_PASSWORD ausente."; exit 1; }
           test -n "$KEY_ALIAS" || { echo "Secret KEY_ALIAS ausente."; exit 1; }
           test -n "$KEY_PASSWORD" || { echo "Secret KEY_PASSWORD ausente."; exit 1; }
-          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
-          echo "KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          mkdir -p "$GITHUB_WORKSPACE/.signing"
+          echo "$KEYSTORE_BASE64" | base64 -d > "$GITHUB_WORKSPACE/.signing/release.jks"
+          echo "KEYSTORE_FILE=$GITHUB_WORKSPACE/.signing/release.jks" >> "$GITHUB_ENV"
 
       - name: Ler a versão
         id: versao
@@ -66,7 +67,12 @@ jobs:
           echo "tag=v$nome" >> "$GITHUB_OUTPUT"
 
       - name: Gerar o APK assinado
-        run: ./gradlew :app:assembleRelease --no-daemon
+        env:
+          KEYSTORE_FILE: ${{ github.workspace }}/.signing/release.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew :app:assembleRelease --no-daemon --no-configuration-cache
 
       - name: Organizar os arquivos da release
         shell: bash
