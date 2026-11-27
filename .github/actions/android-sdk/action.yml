@@ -1,0 +1,30 @@
+name: Android SDK
+description: Instala as ferramentas de linha de comando usadas pelo Gradle para baixar o SDK.
+
+runs:
+  using: composite
+  steps:
+    - name: Instalar as ferramentas de linha de comando
+      shell: bash
+      run: |
+        set -euo pipefail
+        sdk="$RUNNER_TEMP/android-sdk"
+        mkdir -p "$sdk/cmdline-tools"
+        curl -fsSL -o /tmp/commandlinetools.zip \
+          https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+        unzip -q /tmp/commandlinetools.zip -d "$sdk/cmdline-tools"
+        mv "$sdk/cmdline-tools/cmdline-tools" "$sdk/cmdline-tools/latest"
+        set +e
+        set +o pipefail
+        yes | "$sdk/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$sdk" --licenses >"$RUNNER_TEMP/sdk-licenses.log" 2>&1
+        licenca=${PIPESTATUS[1]}
+        set -e
+        set -o pipefail
+        if [ "$licenca" -ne 0 ]; then
+          cat "$RUNNER_TEMP/sdk-licenses.log"
+          exit "$licenca"
+        fi
+        echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
+        echo "ANDROID_SDK_ROOT=$sdk" >> "$GITHUB_ENV"
+        echo "$sdk/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+        echo "$sdk/platform-tools" >> "$GITHUB_PATH"
