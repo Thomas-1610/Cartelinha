@@ -13,7 +13,7 @@ Ele organiza a rotina. Não substitui a orientação de um profissional de saúd
 
 ## Baixar aplicativo
 
-A versão mais recente é a **<!-- versao-atual -->v1.0.0<!-- /versao-atual -->**. O botão abaixo baixa o APK publicado na página oficial de versões deste repositório.
+A versão mais recente é a **<!-- versao-atual -->v1.0.1<!-- /versao-atual -->**. O botão abaixo baixa o APK publicado na página oficial de versões deste repositório.
 
 [![Baixar APK](https://img.shields.io/badge/Baixar%20APK-Cartelinha-BC6261?style=for-the-badge)](https://github.com/Thomas-1610/Cartelinha/releases/latest/download/Cartelinha.apk)
 

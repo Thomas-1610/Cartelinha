@@ -52,9 +52,11 @@ android {
             if (releaseStorePath != null) {
                 signingConfig = signingConfigs.getByName("release")
             }
+            // Não incluir kotlin.** nem kotlinx.**: o R8 pode tornar classes internas
+            // do Kotlin inacessíveis e o Compose (fontes/sequências) quebra na abertura.
             optimization {
                 enable = true
-                packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")
+                packageScope = setOf("androidx.**")
             }
         }
     }
